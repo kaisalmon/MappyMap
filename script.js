@@ -1,13 +1,16 @@
 var rnd = new RNG(100);
 var sea_level = 0.3;
 var mount_level = 0.04;
-var w = 30, h = 30;
-var compactness = 0.3;
+var w = 50, h = 50;
+var compactness = 2;
 var seed = 19;
 
 var TERRAIN = {
     'sea':{'opacity':0.1, 'background':'blue'},
+    'ice':{'opacity':0.6, 'background':'white'},
     'grassland':{'opacity':1, 'background':'#26A65B', 'has_region':true},
+    'forest':{'opacity':1, 'background':'darkgreen', 'has_region':true},
+    'snow':{'opacity':1, 'background':'white', 'has_region':true},
     'mountain':{'opacity':1, 'background':'brown', 'has_region':true},
 }
 
@@ -15,46 +18,34 @@ function create_map(blank){
     if(blank)$('.main').remove();
 
     rnd = new RNG(seed);
-    var layers = [
-        [ 30,  30, 0.1],
-        [ 25,  25, 0.2],
-        [ 12,  12, 0.2],
-        [  6,   6, 0.2],
-        [  3,   3, 0.3],
-    ]
 
-    var n = mult(noise(w, h), layers[0][2])
-    for(var i = 1; i< layers.length; i++){
-        var new_n = mult(noise(layers[i][0], layers[i][1]), layers[i][2]);
-        n = add(n, scale(new_n, w, h));
-    }
+    var n = perlin(w,h);
+    var temp = perlin(w,h);
+    temp = overlay(n,linear(w, h,false,true),1);
+
+    var rain = perlin(w,h);
+
 
     var m = dynamic_threshold(n, mount_level);
     
-    var o = radial(w, h);
-    var os = compactness
-    n = add(
-        mult(n, 1-os),
-        mult(o, os)
-    );
+    var o = radial(w, h,false, true);
+    n = overlay(n, o, compactness);
     n = dynamic_threshold(n, sea_level);
-    var terrain = create_terrain(n, m);
+    var terrain = create_terrain(n, m, temp, rain);
 
     var cont = subtract(n, m); 
-    display(cont);
     cont = shrink(cont);
     cont = grow(cont);
     cont = create_regions(cont);
 
     terrain = add(terrain, cont);
-    display(terrain);
     terrain = expand_regions(terrain);
     display(terrain);
 
 }
 $(document).ready(function(){
     create_map();
-    var settings = $('<div/>').prependTo('body');
+    var settings = $('<div/>').appendTo('body');
 
     $('<button/>').text("Reseed").appendTo(settings).click(function(){
         seed = Math.random();
@@ -69,7 +60,7 @@ $(document).ready(function(){
     settings.append('<br>');
 
     $('<label/>').text("Compactness:").appendTo(settings);
-    $('<input type="range" min="0" max="1" step="0.05">').val(compactness).appendTo(settings).bind('change', function(){
+    $('<input type="range" min="0" max="5" step="0.1">').val(compactness).appendTo(settings).bind('change', function(){
         compactness = $(this).val();
         create_map(true);
     });
@@ -87,7 +78,41 @@ function noise(w,h){
     return n;
 }
 
-function radial(w,h, inv){
+function perlin(w,h){
+    var layers = [
+        [ 30,  30, 0.1],
+        [ 25,  25, 0.1],
+        [ 12,  12, 0.1],
+        [  6,   6, 0.2],
+        [  3,   3, 0.5],
+    ]
+
+    var n = mult(noise(w, h), layers[0][2])
+    for(var i = 1; i< layers.length; i++){
+        var new_n = mult(noise(layers[i][0], layers[i][1]), layers[i][2]);
+        n = add(n, scale(new_n, w, h));
+    }
+    return n;
+}
+function linear(w,h, inv, bi){
+    var n = []
+    var mx = w/2, my = h/2;
+    for(x=0; x < w; x++){
+        n[x] = []
+        for(y=0; y < h; y++){
+            var dy = y/h;
+            if(bi)
+                dy = Math.abs(y/h*2 -1);
+            n[x][y] = dy;  
+            if(!inv)
+                n[x][y] = 1-n[x][y];
+        }
+    }
+    return n;
+}
+
+
+function radial(w,h, inv, square){
     var n = []
     var mx = w/2, my = h/2;
     for(x=0; x < w; x++){
@@ -95,7 +120,10 @@ function radial(w,h, inv){
         for(y=0; y < h; y++){
             var dx = (x - mx)/mx;
             var dy = (y - my)/my;
-            n[x][y] = dx*dx + dy*dy;  
+            if(square)
+                n[x][y] = Math.max(Math.abs(dx), Math.abs(dy));  
+            else
+                n[x][y] = dx*dx + dy*dy;  
             if(!inv)
                 n[x][y] = 1-n[x][y];
         }
@@ -131,10 +159,30 @@ function scale(s, w, h){
     var n = []
     for(x=0; x < w; x++){
         n[x] = []
-        var sx = parseInt(sw/w*x); 
+
+        var ind = (sw)/w*x;
+        ind *= (sw-1)/sw;
+        var sx1 = Math.floor(ind); 
+        var sx2 = Math.ceil(ind); 
+        var rx = sx2-ind;
+
         for(y=0; y < h; y++){
-            var sy = parseInt(sh/h*y); 
-            n[x][y] = s[sx][sy] 
+            var ind = (sh)/h*y;
+            ind *= (sh-1)/sh;
+            var sy1 = Math.floor(ind); 
+            var sy2 = Math.ceil(ind); 
+            var ry = sy2-ind;
+
+            var v11 = s[sx1][sy1];
+            var v12 = s[sx1][sy2] || 0;
+            var vy1 =  v11*ry+v12*(1-ry);
+           
+            var vy2 = 0;
+            var v21 = s[sx2][sy1];
+            var v22 = s[sx2][sy2];
+            vy2 =  v21*ry+v22*(1-ry);
+            
+            n[x][y] = rx*vy1 + (1-rx)*vy2;
         }
     }
     return n;
@@ -143,7 +191,7 @@ function scale(s, w, h){
 function display(n){
     var w = n.length
     var h = n[0].length
-    var $main = $('<div class="main"/>').appendTo('body');
+    var $main = $('<div class="main"/>').prependTo('body');
     for(y=0; y < h; y++){
         for(x=0; x < w; x++){
             if(n[x][y] === undefined){
@@ -184,7 +232,7 @@ function display(n){
     }
 }
 
-function create_terrain(land, mount){
+function create_terrain(land, mount, temp, rain){
     var w = land.length
     var h = land[0].length
     var n = []
@@ -194,10 +242,22 @@ function create_terrain(land, mount){
             if(land[x][y]){
                 if(mount[x][y])
                     n[x][y] = {terrain:"mountain"}
+                else{
+                if(temp[x][y] < 0.45)
+                    n[x][y] = {terrain:"snow"}
                 else
-                    n[x][y] = {terrain:"grassland"}
-            }else
-                n[x][y] = {terrain:"sea"}
+                    if(rain[x][y] > 0.4)
+                        n[x][y] = {terrain:"forest"}
+                    else
+                        n[x][y] = {terrain:"grassland"}
+
+                }
+            }else{
+                if(temp[x][y] < 0.1)
+                    n[x][y] = {terrain:"ice"}
+                else
+                    n[x][y] = {terrain:"sea"}
+            }
         }
     }
     return n;
@@ -211,6 +271,27 @@ function subtract(n1, n2){
         n[x] = []
         for(y=0; y < h; y++){
             n[x][y] = Math.max(n1[x][y] - n2[x][y], 0);
+        }
+    }
+    return n;
+}
+function overlay(n1, n2, strength){
+    strength = strength || 2;
+    var w = n1.length
+    var h = n1[0].length
+    var n = []
+    for(x=0; x < w; x++){
+        n[x] = []
+        for(y=0; y < h; y++){
+            if(n2[x][y] > 0.5){
+                var r = n2[x][y]*2-1;
+                r = Math.pow(r, strength)
+                n[x][y] = n1[x][y]*(1-r) + r;
+            }else{
+                var r = -1 * (n2[x][y]*2-1);
+                r = Math.pow(r, strength)
+                n[x][y] = n1[x][y]*(1-r);
+            }
         }
     }
     return n;
