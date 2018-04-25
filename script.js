@@ -3,6 +3,8 @@ var sea_level = 0.3;
 var mount_level = 0.04;
 var w = 50, h = 50;
 var compactness = 2;
+var forest_threshold = 0.3;
+var ocean_wetness = 0.3;
 var seed = 19;
 
 var TERRAIN = {
@@ -19,21 +21,28 @@ function create_map(blank){
 
     rnd = new RNG(seed);
 
-    var n = perlin(w,h);
+    var land = perlin(w,h);
+
     var temp = perlin(w,h);
-    temp = overlay(n,linear(w, h,false,true),1);
+    temp = overlay(land,linear(w, h,false,true),1);
 
     var rain = perlin(w,h);
 
+    land = normalise(land)
 
-    var m = dynamic_threshold(n, mount_level);
+    var m = dynamic_threshold(land, mount_level);
     
     var o = radial(w, h,false, true);
-    n = overlay(n, o, compactness);
-    n = dynamic_threshold(n, sea_level);
-    var terrain = create_terrain(n, m, temp, rain);
+    land = overlay(land, o, compactness);
 
-    var cont = subtract(n, m); 
+    land = dynamic_threshold(land, sea_level);
+    
+    var sea_wet = mult(invert(blur(land,4)), ocean_wetness)
+    rain = add(sea_wet,rain)
+
+    var terrain = create_terrain(land, m, temp, rain);
+
+    var cont = subtract(land, m); 
     cont = shrink(cont);
     cont = grow(cont);
     cont = create_regions(cont);
@@ -65,6 +74,18 @@ $(document).ready(function(){
         create_map(true);
     });
     settings.append('<br>');
+    $('<label/>').text("Forest Threshold:").appendTo(settings);
+    $('<input type="range" min="0" max="1" step="0.05">').val(forest_threshold).appendTo(settings).bind('change', function(){
+        forest_threshold = $(this).val();
+        create_map(true);
+    });
+    settings.append('<br>');
+    $('<label/>').text("Ocean Wetness:").appendTo(settings);
+    $('<input type="range" min="0" max="1" step="0.05">').val(ocean_wetness).appendTo(settings).bind('change', function(){
+        ocean_wetness = $(this).val();
+        create_map(true);
+    });
+    settings.append('<br>');
 });
 
 function noise(w,h){
@@ -80,16 +101,16 @@ function noise(w,h){
 
 function perlin(w,h){
     var layers = [
-        [ 30,  30, 0.1],
-        [ 25,  25, 0.1],
-        [ 12,  12, 0.1],
-        [  6,   6, 0.2],
-        [  3,   3, 0.5],
+        [ 30,  30, 0.05],
+        [ 25,  25, 0.05],
+        [ 12,  12, 0.3],
+        [  6,   6, 0.6],
+        [  3,   3, 0.1],
     ]
 
     var n = mult(noise(w, h), layers[0][2])
     for(var i = 1; i< layers.length; i++){
-        var new_n = mult(noise(layers[i][0], layers[i][1]), layers[i][2]);
+        var new_n = mult(normalise(noise(layers[i][0], layers[i][1])), layers[i][2]);
         n = add(n, scale(new_n, w, h));
     }
     return n;
@@ -246,7 +267,7 @@ function create_terrain(land, mount, temp, rain){
                 if(temp[x][y] < 0.45)
                     n[x][y] = {terrain:"snow"}
                 else
-                    if(rain[x][y] > 0.4)
+                    if(rain[x][y] > forest_threshold)
                         n[x][y] = {terrain:"forest"}
                     else
                         n[x][y] = {terrain:"grassland"}
@@ -360,6 +381,18 @@ function mult(s, factor){
         }
     }
     return n;
+}
+function expo(s, factor){
+    var w = s.length
+    var h = s[0].length
+    var n = []
+    for(x=0; x < w; x++){
+        n[x] = []
+        for(y=0; y < h; y++){
+            n[x][y] = Math.pow(s[x][y], factor);
+        }
+    }
+    return n;
 } 
 
 function grow(s){
@@ -415,6 +448,18 @@ function shrink(s){
     }
     return n;
 }
+function invert(s, th){
+    var w = s.length
+    var h = s[0].length
+    var n = []
+    for(x=0; x < w; x++){
+        n[x] = []
+        for(y=0; y < h; y++){
+            n[x][y] = 1-s[x][y];
+        }
+    }
+    return n;
+}
 function threshold(s, th){
     var w = s.length
     var h = s[0].length
@@ -427,7 +472,57 @@ function threshold(s, th){
     }
     return n;
 }
-
+function normalise(s){
+    var w = s.length
+    var h = s[0].length
+    var n = []
+    var min = 1; 
+    for(x=0; x < w; x++){
+        for(y=0; y < h; y++){
+            min = Math.min(min, s[x][y]);
+        }
+    }
+    for(x=0; x < w; x++){
+        n[x] = []
+        for(y=0; y < h; y++){
+            n[x][y] = s[x][y]-min;
+        }
+    }
+    var max = 0; 
+    for(x=0; x < w; x++){
+        for(y=0; y < h; y++){
+            max = Math.max(max, s[x][y]);
+        }
+    }
+    for(x=0; x < w; x++){
+        for(y=0; y < h; y++){
+            n[x][y] = n[x][y]/max;
+        }
+    }
+    var target = 0.5;
+    var pivot = 3;
+    var jump= pivot/2;
+    var prev_c = null;
+    var i = 0;
+    while(true){
+        i++;
+        if(i>1000){
+            throw ("😫");
+        }
+        var n = expo(s, pivot);
+        var c = avg(n);
+        if(c < target)
+            pivot -= jump;
+        else
+            pivot += jump;
+        jump/= 2;
+        
+        if(prev_c && Math.abs(c-prev_c) < 5)
+            return n;
+        prev_c = c;
+    }
+    return n;
+}
 function create_regions(s){
     var w = s.length
     var h = s[0].length
@@ -477,6 +572,41 @@ function floodfill(n, x, y, from, to){
     floodfill(n, x+1, y-1, from, to);
 }
 
+function blur(s, d){
+    d = d||1;
+    var h = s[0].length
+    var w = s.length
+    var out = []
+    for(x=0; x < w; x++){
+        out[x] = []
+        for(y=0; y < h; y++){
+            out[x][y] = get(s, x, y) / 9 
+            out[x][y] += get(s, x+1, y) / 9 
+            out[x][y] += get(s, x-1, y) / 9 
+
+            out[x][y] += get(s, x, y+1) / 9 
+            out[x][y] += get(s, x+1, y+1) / 9 
+            out[x][y] += get(s, x, y+1) / 9 
+
+            out[x][y] += get(s, x+1, y-1) / 9 
+            out[x][y] += get(s, x-1, y-1) / 9 
+            out[x][y] += get(s, x-1, y-1) / 9 
+        }
+    }
+    if(d==1){
+        return out;
+    }else{
+        return blur(out, d-1)
+    }
+}
+
+function get(s,x,y,def){
+    if(s[x] && s[x][y]){
+        return s[x][y]
+    }
+    return def || 0;
+}
+
 function count(s){
     var h = s[0].length
     var w = s.length
@@ -487,6 +617,18 @@ function count(s){
         }
     }
     return count;
+}
+
+function avg(s){
+    var h = s[0].length
+    var w = s.length
+    var count = 0;
+    for(x=0; x < w; x++){
+        for(y=0; y < h; y++){
+            count += s[x][y];
+        }
+    }
+    return count/w/h;
 }
 
 function dynamic_threshold(s, r){
