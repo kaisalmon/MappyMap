@@ -1,19 +1,23 @@
 var rnd = new RNG(100);
 var sea_level = 0.3;
 var mount_level = 0.04;
-var w = 50, h = 50;
+var w = 60, h = 60;
 var compactness = 2;
-var forest_threshold = 0.3;
-var ocean_wetness = 0.3;
-var seed = 19;
+var forest_threshold = 0.4;
+var desert_threshold = 0.15;
+var ocean_wetness = 0.7;
+var region_shrink = 2;
+var region_grow = 1;
+var seed = 3;
 
 var TERRAIN = {
     'sea':{'opacity':0.1, 'background':'blue'},
     'ice':{'opacity':0.6, 'background':'white'},
-    'grassland':{'opacity':1, 'background':'#26A65B', 'has_region':true},
-    'forest':{'opacity':1, 'background':'darkgreen', 'has_region':true},
-    'snow':{'opacity':1, 'background':'white', 'has_region':true},
-    'mountain':{'opacity':1, 'background':'brown', 'has_region':true},
+    'grassland':{'opacity':1, 'background':'#26A65B', 'has_region':true, "hospitable":true},
+    'desert':{'opacity':1, 'background':'#EDC9AF', 'has_region':true, "hospitable": false},
+    'forest':{'opacity':1, 'background':'darkgreen', 'has_region':true, "hospitable":true},
+    'snow':{'opacity':1, 'background':'white', 'has_region':true, "hospitable": false},
+    'mountain':{'opacity':1, 'background':'brown', 'has_region':true, "hospitable": false},
 }
 
 function create_map(blank){
@@ -38,13 +42,20 @@ function create_map(blank){
     land = dynamic_threshold(land, sea_level);
     
     var sea_wet = mult(invert(blur(land,4)), ocean_wetness)
+    rain = normalise(rain)
     rain = add(sea_wet,rain)
+    display(rain)
 
+    
     var terrain = create_terrain(land, m, temp, rain);
 
-    var cont = subtract(land, m); 
-    cont = shrink(cont);
-    cont = grow(cont);
+    var hospitability_map = apply(terrain, (t) => (TERRAIN[t.terrain].hospitable) && (TERRAIN[t.terrain].has_region||false) ? 1 : 0)
+
+    var cont = hospitability_map;
+    for(var i = 0; i < region_shrink;i++)
+        cont = shrink(cont)
+    for(var i = 0; i < region_grow;i++)
+        cont = grow(cont)
     cont = create_regions(cont);
 
     terrain = add(terrain, cont);
@@ -62,7 +73,7 @@ $(document).ready(function(){
     });
     settings.append('<br>');
     $('<label/>').text("Sea Level:").appendTo(settings);
-    $('<input type="range" min="0" max="1" step="0.05">').val(sea_level).appendTo(settings).bind('change', function(){
+    $('<input type="range" min="0" max="1" step="0.01">').val(sea_level).appendTo(settings).bind('change', function(){
         sea_level = $(this).val();
         create_map(true);
     });
@@ -75,17 +86,44 @@ $(document).ready(function(){
     });
     settings.append('<br>');
     $('<label/>').text("Forest Threshold:").appendTo(settings);
-    $('<input type="range" min="0" max="1" step="0.05">').val(forest_threshold).appendTo(settings).bind('change', function(){
+    $('<input type="range" min="0" max="1" step="0.01">').val(forest_threshold).appendTo(settings).bind('change', function(){
         forest_threshold = $(this).val();
         create_map(true);
     });
+     settings.append('<br>');
+    $('<label/>').text("Mount Threshold:").appendTo(settings);
+    $('<input type="range" min="0" max="0.1" step="0.005">').val(mount_level).appendTo(settings).bind('change', function(){
+        mount_level = $(this).val();
+        create_map(true);
+    });
+
+
+    settings.append('<br>');
+    $('<label/>').text("Desert Threshold:").appendTo(settings);
+    $('<input type="range" min="0" max="1" step="0.01">').val(desert_threshold).appendTo(settings).bind('change', function(){
+        desert_threshold = $(this).val();
+        create_map(true);
+    });
+
     settings.append('<br>');
     $('<label/>').text("Ocean Wetness:").appendTo(settings);
-    $('<input type="range" min="0" max="1" step="0.05">').val(ocean_wetness).appendTo(settings).bind('change', function(){
+    $('<input type="range" min="0" max="1" step="0.01">').val(ocean_wetness).appendTo(settings).bind('change', function(){
         ocean_wetness = $(this).val();
         create_map(true);
     });
     settings.append('<br>');
+    $('<label/>').text("Region Shrink:").appendTo(settings);
+    $('<input type="range" min="0" max="4" step="1">').val(region_shrink).appendTo(settings).bind('change', function(){
+        region_shrink = $(this).val();
+        create_map(true);
+    });
+   settings.append('<br>');
+    $('<label/>').text("Region Grow:").appendTo(settings);
+    $('<input type="range" min="0" max="4" step="1">').val(region_grow).appendTo(settings).bind('change', function(){
+        region_grow = $(this).val();
+        create_map(true);
+    });
+   settings.append('<br>');
 });
 
 function noise(w,h){
@@ -269,8 +307,10 @@ function create_terrain(land, mount, temp, rain){
                 else
                     if(rain[x][y] > forest_threshold)
                         n[x][y] = {terrain:"forest"}
-                    else
+                    else if(rain[x][y] > desert_threshold || temp[x][y] < 0.5)
                         n[x][y] = {terrain:"grassland"}
+                    else
+                        n[x][y] = {terrain:"desert"}
 
                 }
             }else{
@@ -459,6 +499,19 @@ function invert(s, th){
         }
     }
     return n;
+}
+function apply(s, f){
+    var w = s.length
+    var h = s[0].length
+    var n = []
+    for(x=0; x < w; x++){
+        n[x] = []
+        for(y=0; y < h; y++){
+            n[x][y] = f(s[x][y]);
+        }
+    }
+    return n;
+
 }
 function threshold(s, th){
     var w = s.length
